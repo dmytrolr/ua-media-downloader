@@ -30,7 +30,6 @@ class MediaDownloaderApp(ctk.CTk):
         self.is_processing = False  
         self.core = YtdlpCore(self)
         
-        # Визначаємо формати
         self.formats = {
             "MP3 (Стандарт)": ("mp3", "audio", "mp3.png"),
             "FLAC (Hi-Res)": ("flac", "audio", "flac.png"),
@@ -40,7 +39,6 @@ class MediaDownloaderApp(ctk.CTk):
             "MP4 (Відео 1080p+)": ("mp4_best", "video", "mp4.png")
         }
         
-        # 3. Тепер запускаємо UI, коли self.icons_path вже точно існує
         self.init_ui()
         self.setup_context_menu()
         self.check_dependencies()
@@ -89,14 +87,16 @@ class MediaDownloaderApp(ctk.CTk):
         # Кнопка сніфера 
         self.sniff_btn = ctk.CTkButton(
             self.url_container,
-            text="🔍",
-            width=45,
+            text="Sniff", # Пишемо текстом, він точно відобразиться
+            width=60,
             height=45,
             corner_radius=12,
-            fg_color="#3D3D3D", 
+            font=("sans-serif", 13, "bold"),
+            fg_color="#3D3D3D",
+            hover_color="#4D4D4D",
             command=self.start_sniffing
         )
-        self.sniff_btn.pack(side="right")
+        self.sniff_btn.pack(side="right", padx=(5, 0))
 
         self.settings_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.settings_frame.pack(pady=15, fill="x")
@@ -162,13 +162,14 @@ class MediaDownloaderApp(ctk.CTk):
         
         item = self.queue.pop(0)
         url, title = item if isinstance(item, tuple) else (item, "Медіа")
+        
+        # ОНОВЛЕННЯ СТАТУСУ
+        self.update_status(f"📥 Завантаження: {title[:20]}...", self.accent_color)
 
         choice = self.format_combo.get()
         f_ext, m_type, _ = self.formats[choice]
 
         self.log(f"🚀 Початок: {title}")
-        
-        # Створюємо папку перед завантаженням
         os.makedirs(self.save_path, exist_ok=True)
 
         threading.Thread(
@@ -245,33 +246,33 @@ class MediaDownloaderApp(ctk.CTk):
             self.log("⚠️ Вставте посилання для аналізу")
             return
 
+        # кнопки
         self.sniff_btn.configure(state="disabled", text="⏳")
-        self.log(f"🔎 Шукаю прямі потоки на {url}...")
+        self.update_status("🔍 Аналізую сторінку...", "#FFA500")
         
-                
-        def run():
-            links = sniff_url(url) # Викликаємо правильну функцію
-            # Повертаємось у головний потік через .after
-            self.after(0, lambda: self.finish_sniffing(links))
-            
-        threading.Thread(target=run, daemon=True).start()
+        self.log(f"🔎 Сніфер: аналіз сторінки {url}")
         
         def run():
-            links = get_direct_links(url)
-            # Повертаємось у головний потік через .after
-            self.after(0, lambda: self.finish_sniffing(links))
-            
+            try:
+                links = sniff_url(url)
+                self.after(0, lambda: self.finish_sniffing(links))
+            except Exception as e:
+                self.after(0, lambda: self.log(f"❌ Помилка сніфера: {e}"))
+                self.after(0, lambda: self.sniff_btn.configure(state="normal", text="🔍"))
+
         threading.Thread(target=run, daemon=True).start()
 
     def finish_sniffing(self, links):
-        self.sniff_btn.configure(state="normal", text="🔍")
+        self.sniff_btn.configure(state="normal", text="Sniff") # Повертаємо текст
         
         if not links:
-            self.log("❌ Сніфер не знайшов посилань. Можливо, сайт захищений.")
+            # Один чіткий запис про невдачу
+            self.log("❌ Сніфер не знайшов прямих посилань (сайт захищений)")
+            self.update_status("Нічого не знайдено", "red")
             return
 
-        # Беремо перше посилання (як правило, воно найактуальніше)
+        # Якщо знайшли - показуємо лінк
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, links[0])
-        self.log(f"✅ Знайдено пряме посилання! ({len(links)} варіантів)")
-        self.status_label.configure(text="Потік знайдено", text_color=self.accent_color)
+        self.log(f"✅ Знайдено потік: {links[0][:60]}...")
+        self.update_status("Потік знайдено!", self.accent_color)

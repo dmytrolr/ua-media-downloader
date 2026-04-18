@@ -83,37 +83,40 @@ def check_ffmpeg():
 def sniff_url(url):
     headers = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': url # Додаємо реферер, щоб сайт нас не відфутболив
+        'Referer': url
     }
     
     try:
-        with requests.get(url, headers=headers, timeout=7) as r:
-            r.raise_for_status()
-            content = r.text
-
-        patterns = [
-            r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
-            r'(https?://[^\s"\']+\.m3u8[^\s"\']*)'
-        ]
+        r = requests.get(url, headers=headers, timeout=10)
+        content = r.text
         
-        found_links = []
-        for pattern in patterns:
-            found = [l.replace('\\/', '/') for l in re.findall(pattern, content)]
-            found_links.extend(found)
-
-        iframes = re.findall(r'src=["\'](https?://[^"\']+(?:ashdi|videoframe|player|embed)[^"\']+)["\']', content)
+        # шукаємо прямі лінки
+        found_links = re.findall(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', content)
+        
+        # шукаємо iframe і шукаємо src у тегах iframe
+        iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', content)
         
         for ifr_url in iframes:
-            # Пробуємо зайти всередину плеєра
+            # відносні посилання в iframe
+            if ifr_url.startswith('//'):
+                ifr_url = 'https:' + ifr_url
+            
             try:
-                ifr_res = requests.get(ifr_url, headers={'Referer': url}, timeout=5)
-                # Шукаємо m3u8 вже всередині коду плеєра
-                stream_links = re.findall(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', ifr_res.text)
-                found_links.extend([l.replace('\\/', '/') for l in stream_links])
+                # всередину плеєра
+                ifr_r = requests.get(ifr_url, headers={'Referer': url}, timeout=5)
+                # пошук m3u8 всередині коду плеєра
+                streams = re.findall(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', ifr_r.text)
+                found_links.extend(streams)
             except:
                 continue
 
-        return sorted(list(set(found_links)), key=lambda x: '.m3u8' in x, reverse=True)
+        # очистка
+        final_links = [l.replace('\\/', '/') for l in found_links]
+        return sorted(list(set(final_links)), reverse=True)
+
+    except Exception as e:
+        print(f"Deep sniff error: {e}")
+        return []
 
     except Exception:
         return []
