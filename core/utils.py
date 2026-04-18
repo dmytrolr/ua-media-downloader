@@ -1,4 +1,4 @@
-# core/utils.py 
+#core/utils.py
 
 import os
 import sys
@@ -9,20 +9,29 @@ import platform
 import shutil
 from pathlib import Path
 
+def get_resource_path(relative_path):
+    """Отримує шлях до ресурсів, адаптований для PyInstaller та звичайного запуску"""
+    try:
+        # Шлях для PyInstaller (_MEIPASS)
+        base_path = sys._MEIPASS
+    except Exception:
+        # Звичайний шлях (корінь проекту)
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    return os.path.join(base_path, relative_path)
+
 def create_desktop_shortcut():
-    """Створює або оновлює .desktop файли, адаптуючись до переміщення папки."""
+    """Створює або оновлює .desktop файли для Linux"""
     if platform.system() != "Linux":
         return
 
     project_root = Path(__file__).resolve().parent.parent
     main_py_path = project_root / "main.py"
     
-    # Визначаємо іконку
-    icon_path = project_root / "icons" / "main_icon.png"
-    if not icon_path.exists():
-        icon_path = project_root / "icons" / "mp4.png"
+    icon_path = get_resource_path("icons/main_icon.png")
+    if not os.path.exists(icon_path):
+        icon_path = get_resource_path("icons/mp4.png")
     
-    # Генеруємо вміст із АКТУАЛЬНИМИ на цей момент шляхами
     desktop_file_content = f"""[Desktop Entry]
 Name=UA Media Downloader
 Exec=python3 {main_py_path}
@@ -35,7 +44,6 @@ Path={project_root}
 StartupNotify=true
 """
 
-    # Шляхи до ярликів
     shortcuts = [
         Path.home() / "Desktop" / "UA Media Downloader.desktop",
         Path.home() / ".local" / "share" / "applications" / "ua_media_downloader.desktop"
@@ -43,87 +51,69 @@ StartupNotify=true
 
     try:
         shortcuts[1].parent.mkdir(parents=True, exist_ok=True)
-        
         for p in shortcuts:
-            # Записуємо (або перезаписуємо) файл новими шляхами
             with open(p, "w") as f:
                 f.write(desktop_file_content)
             os.chmod(p, 0o755)
-            
         subprocess.run(["update-desktop-database", str(Path.home() / ".local/share/applications")], check=False)
-        
         return True
     except Exception as e:
         print(f"Помилка оновлення ярлика: {e}")
         return False
 
-def get_resource_path(relative_path):
-    """Отримує шлях до ресурсів (іконок), адаптований для PyInstaller"""
-    try:
-        # Коли PyInstaller запустить програму, він створить папку _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # Якщо ми просто запускаємо код (python main.py), беремо звичайний шлях
-        base_path = os.path.abspath(".")
-    
-    return os.path.join(base_path, relative_path)
-
 def get_default_path():
-    """Знаходить папку Відео/Музика незалежно від мови системи (XDG)"""
+    """Знаходить папку Музика/Відео через xdg-user-dir"""
     try:
-        # Пріоритет на папку MUSIC або VIDEOS
-        path = subprocess.check_output(['xdg-user-dir', 'MUSIC'], encoding='utf-8').strip()
-        if not path or not os.path.exists(path):
-            path = subprocess.check_output(['xdg-user-dir', 'VIDEOS'], encoding='utf-8').strip()
-        if path and os.path.exists(path):
-            return path
+        for xdg_type in ['MUSIC', 'VIDEOS']:
+            path = subprocess.check_output(['xdg-user-dir', xdg_type], encoding='utf-8').strip()
+            if path and os.path.exists(path):
+                return path
     except:
         pass
     return os.path.join(os.path.expanduser("~"), "Videos")
 
 def apply_system_fixes():
-    """Фікси для стабільності GUI на Linux (Debian/Fedora)"""
+    """Фікси для X11/Wayland"""
     if platform.system() == "Linux":
         os.environ["QT_X11_NO_MITSHM"] = "1"
-        # Можна додати специфічні змінні для відображення іконок
 
 def check_ffmpeg():
-    """Повертає шлях до ffmpeg або None"""
     return shutil.which("ffmpeg")
 
-def get_resource_path(relative_path):
-    """Отримує шлях до іконок та ресурсів"""
-    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
-
 def sniff_url(url):
-    """
-    Шукає прямі посилання на відео в HTML-коді сторінки.
-    """
     headers = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': url # Додаємо реферер, щоб сайт нас не відфутболив
     }
     
     try:
-        # Завантажуємо  перші 500КБ сторінки для заголовків
-        with requests.get(url, headers=headers, timeout=5, stream=True) as r:
+        with requests.get(url, headers=headers, timeout=7) as r:
             r.raise_for_status()
-            content = r.raw.read(512000).decode('utf-8', errors='ignore')
+            content = r.text
 
-        # Шукаємо mp4, m3u8 (HLS потоки) та mpd (DASH)
-        # Регулярка шукає посилання в лапках або після '='
         patterns = [
             r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
-            r'(https?://[^\s"\']+\.m3u8[^\s"\']*)',
-            r'(https?://[^\s"\']+\.mpd[^\s"\']*)'
+            r'(https?://[^\s"\']+\.m3u8[^\s"\']*)'
         ]
         
         found_links = []
         for pattern in patterns:
-            found_links.extend(re.findall(pattern, content))
+            found = [l.replace('\\/', '/') for l in re.findall(pattern, content)]
+            found_links.extend(found)
+
+        iframes = re.findall(r'src=["\'](https?://[^"\']+(?:ashdi|videoframe|player|embed)[^"\']+)["\']', content)
         
-        # Очищуємо від дублікатів та сортуємо
+        for ifr_url in iframes:
+            # Пробуємо зайти всередину плеєра
+            try:
+                ifr_res = requests.get(ifr_url, headers={'Referer': url}, timeout=5)
+                # Шукаємо m3u8 вже всередині коду плеєра
+                stream_links = re.findall(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', ifr_res.text)
+                found_links.extend([l.replace('\\/', '/') for l in stream_links])
+            except:
+                continue
+
         return sorted(list(set(found_links)), key=lambda x: '.m3u8' in x, reverse=True)
 
-    except Exception as e:
-        return [f"Помилка аналізу: {str(e)}"]
+    except Exception:
+        return []

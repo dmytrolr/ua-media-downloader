@@ -5,16 +5,15 @@ import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
 from PIL import Image
-from core.utils import get_default_path, check_ffmpeg
+from core.utils import get_default_path, check_ffmpeg, sniff_url
+from core.utils import sniff_url
 from core.downloader import YtdlpCore
-
+           
 class MediaDownloaderApp(ctk.CTk):
-    def __init__(self, icons_path=None): # 1. Додаємо параметр тут
+    def __init__(self, icons_path=None): 
         super().__init__()
 
-        # 2. Спершу визначаємо шлях до іконок
         if icons_path is None:
-            # Це шлях за замовчуванням, якщо запускати скрипт вручну
             self.icons_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons")
         else:
             self.icons_path = icons_path
@@ -26,7 +25,7 @@ class MediaDownloaderApp(ctk.CTk):
         self.is_aborting = False
         self.show_logs = False
         self.last_pasted_url = ""  
-        
+                
         self.queue = []  
         self.is_processing = False  
         self.core = YtdlpCore(self)
@@ -73,9 +72,31 @@ class MediaDownloaderApp(ctk.CTk):
 
         ctk.CTkLabel(self.main_frame, text="UA Media Downloader", font=("sans-serif", 24, "bold")).pack(pady=(25, 10))
         
-        self.url_entry = ctk.CTkEntry(self.main_frame, width=520, height=45, corner_radius=12, placeholder_text="Вставте посилання...")
-        self.url_entry.pack(pady=10, padx=20)
+        # Контейнер для поля вводу та кнопки сніфера
+        self.url_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.url_container.pack(pady=10, padx=20, fill="x")
+
+        self.url_entry = ctk.CTkEntry(
+            self.url_container, 
+            width=460, 
+            height=45, 
+            corner_radius=12, 
+            placeholder_text="Вставте посилання..."
+        )
+        self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.url_entry.bind("<Return>", lambda e: self.start_download_thread())
+
+        # Кнопка сніфера 
+        self.sniff_btn = ctk.CTkButton(
+            self.url_container,
+            text="🔍",
+            width=45,
+            height=45,
+            corner_radius=12,
+            fg_color="#3D3D3D", 
+            command=self.start_sniffing
+        )
+        self.sniff_btn.pack(side="right")
 
         self.settings_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.settings_frame.pack(pady=15, fill="x")
@@ -217,3 +238,40 @@ class MediaDownloaderApp(ctk.CTk):
                 self.last_pasted_url = clip
                 self.log("✨ Посилання підхоплено")
         except: pass
+
+    def start_sniffing(self):
+        url = self.url_entry.get().strip()
+        if not url:
+            self.log("⚠️ Вставте посилання для аналізу")
+            return
+
+        self.sniff_btn.configure(state="disabled", text="⏳")
+        self.log(f"🔎 Шукаю прямі потоки на {url}...")
+        
+                
+        def run():
+            links = sniff_url(url) # Викликаємо правильну функцію
+            # Повертаємось у головний потік через .after
+            self.after(0, lambda: self.finish_sniffing(links))
+            
+        threading.Thread(target=run, daemon=True).start()
+        
+        def run():
+            links = get_direct_links(url)
+            # Повертаємось у головний потік через .after
+            self.after(0, lambda: self.finish_sniffing(links))
+            
+        threading.Thread(target=run, daemon=True).start()
+
+    def finish_sniffing(self, links):
+        self.sniff_btn.configure(state="normal", text="🔍")
+        
+        if not links:
+            self.log("❌ Сніфер не знайшов посилань. Можливо, сайт захищений.")
+            return
+
+        # Беремо перше посилання (як правило, воно найактуальніше)
+        self.url_entry.delete(0, "end")
+        self.url_entry.insert(0, links[0])
+        self.log(f"✅ Знайдено пряме посилання! ({len(links)} варіантів)")
+        self.status_label.configure(text="Потік знайдено", text_color=self.accent_color)
