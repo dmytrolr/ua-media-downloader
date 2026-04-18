@@ -2,6 +2,8 @@
 
 import os
 import sys
+import re
+import requests
 import subprocess
 import platform
 import shutil
@@ -12,7 +14,6 @@ def create_desktop_shortcut():
     if platform.system() != "Linux":
         return
 
-    # КЛЮЧОВИЙ МОМЕНТ: Беремо шлях САМЕ ЗАРАЗ (там, де лежить запущений файл)
     project_root = Path(__file__).resolve().parent.parent
     main_py_path = project_root / "main.py"
     
@@ -94,3 +95,35 @@ def get_resource_path(relative_path):
     """Отримує шлях до іконок та ресурсів"""
     base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
+
+def sniff_url(url):
+    """
+    Шукає прямі посилання на відео в HTML-коді сторінки.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        # Завантажуємо  перші 500КБ сторінки для заголовків
+        with requests.get(url, headers=headers, timeout=5, stream=True) as r:
+            r.raise_for_status()
+            content = r.raw.read(512000).decode('utf-8', errors='ignore')
+
+        # Шукаємо mp4, m3u8 (HLS потоки) та mpd (DASH)
+        # Регулярка шукає посилання в лапках або після '='
+        patterns = [
+            r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+\.mpd[^\s"\']*)'
+        ]
+        
+        found_links = []
+        for pattern in patterns:
+            found_links.extend(re.findall(pattern, content))
+        
+        # Очищуємо від дублікатів та сортуємо
+        return sorted(list(set(found_links)), key=lambda x: '.m3u8' in x, reverse=True)
+
+    except Exception as e:
+        return [f"Помилка аналізу: {str(e)}"]

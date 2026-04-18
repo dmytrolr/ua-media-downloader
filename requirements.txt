@@ -1,3 +1,4 @@
 customtkinter
 pillow
 yt-dlp
+requests
